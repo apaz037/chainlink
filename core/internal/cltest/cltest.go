@@ -1059,11 +1059,25 @@ func WaitForEthTxCount(t testing.TB, store *strpkg.Store, want int) []models.Eth
 	var txes []models.EthTx
 	var err error
 	g.Eventually(func() []models.EthTx {
-		err = store.DB.Find(&txes).Error
+		err = store.DB.Order("nonce desc").Find(&txes).Error
 		assert.NoError(t, err)
 		return txes
 	}, DBWaitTimeout, DBPollingInterval).Should(gomega.HaveLen(want))
 	return txes
+}
+
+func WaitForEthTxAttemptsForEthTx(t testing.TB, store *strpkg.Store, ethTx models.EthTx) []models.EthTxAttempt {
+	t.Helper()
+	g := gomega.NewGomegaWithT(t)
+
+	var attempts []models.EthTxAttempt
+	var err error
+	g.Eventually(func() int {
+		err = store.DB.Order("created_at desc").Where("eth_tx_id = ?", ethTx.ID).Find(&attempts).Error
+		assert.NoError(t, err)
+		return len(attempts)
+	}, DBWaitTimeout, DBPollingInterval).Should(gomega.BeNumerically(">", 0))
+	return attempts
 }
 
 func WaitForEthTxAttemptCount(t testing.TB, store *strpkg.Store, want int) []models.EthTxAttempt {

@@ -245,7 +245,7 @@ type maliciousFluxMonitor interface {
 	CreateJob(t *testing.T, jobSpecId *models.ID, polledAnswer decimal.Decimal, nextRound *big.Int) error
 }
 
-func waitForRunsAndAttemptsCount(
+func waitForRunsAndEthTxCount(
 	t *testing.T,
 	job models.JobSpec,
 	runCount int,
@@ -256,9 +256,9 @@ func waitForRunsAndAttemptsCount(
 	store := app.Store
 	jrs := cltest.WaitForRuns(t, job, store, runCount) // Submit answer from
 	app.EthBroadcaster.Trigger()
-	cltest.WaitForEthTxAttemptCount(t, store, runCount)
-	txa := cltest.GetLastEthTxAttempt(t, store)
-	cltest.WaitForTxInMempool(t, backend, txa.Hash)
+	txes := cltest.WaitForEthTxCount(t, store, runCount)
+	txas := cltest.WaitForEthTxAttemptsForEthTx(t, store, txes[0])
+	cltest.WaitForTxInMempool(t, backend, txas[0].Hash)
 
 	backend.Commit()
 	return jrs
@@ -337,7 +337,7 @@ func TestFluxMonitorAntiSpamLogic(t *testing.T) {
 	initr.InitiatorParams.Address = fa.aggregatorContractAddress
 
 	j := cltest.CreateJobSpecViaWeb(t, app, job)
-	jrs := waitForRunsAndAttemptsCount(t, j, 1, app, fa.backend)
+	jrs := waitForRunsAndEthTxCount(t, j, 1, app, fa.backend)
 
 	reportedPrice := jrs[0].RunRequest.RequestParams.Get("result").String()
 	assert.Equal(t, reportedPrice, fmt.Sprintf("%d", atomic.LoadInt64(&reportPrice)), "failed to report correct price to contract")
@@ -365,7 +365,7 @@ func TestFluxMonitorAntiSpamLogic(t *testing.T) {
 	// Triggers a new round, since price deviation exceeds threshold
 	atomic.StoreInt64(&reportPrice, answer+1)
 
-	waitForRunsAndAttemptsCount(t, j, 2, app, fa.backend)
+	waitForRunsAndEthTxCount(t, j, 2, app, fa.backend)
 
 	select {
 	case log := <-submissionReceived:
@@ -407,7 +407,7 @@ func TestFluxMonitorAntiSpamLogic(t *testing.T) {
 	err = app.FluxMonitor.(maliciousFluxMonitor).CreateJob(t, j.ID, decimal.New(processedAnswer, precision), big.NewInt(newRound))
 	require.NoError(t, err)
 
-	waitForRunsAndAttemptsCount(t, j, 3, app, fa.backend)
+	waitForRunsAndEthTxCount(t, j, 3, app, fa.backend)
 
 	select {
 	case <-submissionReceived:
@@ -432,7 +432,7 @@ func TestFluxMonitorAntiSpamLogic(t *testing.T) {
 		completesAnswer: true})
 	// start a legitimate new round
 	atomic.StoreInt64(&reportPrice, reportPrice+3)
-	waitForRunsAndAttemptsCount(t, j, 4, app, fa.backend)
+	waitForRunsAndEthTxCount(t, j, 4, app, fa.backend)
 
 	select {
 	case <-submissionReceived:
@@ -504,21 +504,21 @@ func TestFluxMonitor_HibernationMode(t *testing.T) {
 	// lower global kill switch flag - should trigger job run
 	fa.flagsContract.LowerFlags(fa.sergey, []common.Address{utils.ZeroAddress})
 	fa.backend.Commit()
-	waitForRunsAndAttemptsCount(t, job, 1, app, fa.backend)
+	waitForRunsAndEthTxCount(t, job, 1, app, fa.backend)
 
 	// change in price should trigger run
 	reportPrice = int64(2)
-	waitForRunsAndAttemptsCount(t, job, 2, app, fa.backend)
+	waitForRunsAndEthTxCount(t, job, 2, app, fa.backend)
 
 	// lower contract's flag - should have no effect (but currently does)
 	// TODO - https://www.pivotaltracker.com/story/show/175419789
 	fa.flagsContract.LowerFlags(fa.sergey, []common.Address{initr.Address})
 	fa.backend.Commit()
-	waitForRunsAndAttemptsCount(t, job, 3, app, fa.backend)
+	waitForRunsAndEthTxCount(t, job, 3, app, fa.backend)
 
 	// change in price should trigger run
 	reportPrice = int64(4)
-	waitForRunsAndAttemptsCount(t, job, 4, app, fa.backend)
+	waitForRunsAndEthTxCount(t, job, 4, app, fa.backend)
 
 	// raise both flags
 	fa.flagsContract.RaiseFlag(fa.sergey, initr.Address)
